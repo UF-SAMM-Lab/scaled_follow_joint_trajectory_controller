@@ -85,10 +85,6 @@ bool ScaledFJTController<H,T>::doInit()
   m_ratio_pub_id    = this->template add_publisher<std_msgs::Float64>("execution_ratio",1);
   m_unscaled_pub_id = this->template add_publisher<sensor_msgs::JointState>("unscaled_joint_target",1);
 
-  this->getControllerNh().template advertise<std_msgs::Float64>("pippo",1);
-  //  m_scaled_time_pub = controller_nh.advertise<std_msgs::Float64>("scaled_time",1);
-  //  m_ratio_pub =controller_nh.advertise<std_msgs::Float64>("execution_ratio",1);
-
   CNR_TRACE(this->logger(),"create action server");
   try
   {

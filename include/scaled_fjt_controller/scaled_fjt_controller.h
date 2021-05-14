@@ -71,9 +71,6 @@ protected:
   void actionCancelCallback(actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::GoalHandle gh);
   void overrideCallback(const std_msgs::Int64ConstPtr& msg, const std::string& override_name);
 
-  ros::Publisher m_unscaled_target_pub;
-  ros::Publisher m_scaled_time_pub;
-  ros::Publisher m_ratio_pub;
 
   size_t m_scaled_pub_id;
   size_t m_ratio_pub_id;
