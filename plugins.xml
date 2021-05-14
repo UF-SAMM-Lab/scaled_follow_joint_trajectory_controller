@@ -1,0 +1,15 @@
+<library path="lib/libscaled_fjt_controller">
+  <class name="cnr/control/ScaledFJTPosController"
+         type="cnr::control::ScaledFJTPosController"
+         base_class_type="controller_interface::ControllerBase">
+    <description>
+    </description>
+  </class>
+
+  <class name="cnr/control/ScaledFJTPosVelEffController"
+       type="cnr::control::ScaledFJTPosVelEffController"
+       base_class_type="controller_interface::ControllerBase">
+    <description>
+    </description>
+  </class>
+</library>
