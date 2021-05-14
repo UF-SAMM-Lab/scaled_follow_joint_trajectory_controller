@@ -57,7 +57,8 @@ Scaled_fjt_controller is continuosly evolving. If you find errors or if you have
 ## Developer Contact
 ### **Authors**
 - Manuel Beschi (<mailto::manuel.beschi@unibs.it>)
-- Marco Faroni (<mailto::marco.faroni@unibs.it>)
+- Nicola Pedrocchi (<mailto::nicola.pedrocchi@stiima.cnr.it>)
+- Marco Faroni (<mailto::marco.faroni@stiima.cnr.it>)
 
 ## Acknowledgements
 Scaled FJT controller is developed by the Joint Research Lab  UNIBS-DIMI/CNR-STIIMA
