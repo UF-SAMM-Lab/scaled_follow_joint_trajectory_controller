@@ -22,6 +22,7 @@
   <exec_depend>roscpp</exec_depend>
   <depend>name_sorting</depend>
   <depend>controller_interface</depend>
+  <depend>rosdyn_chain_state</depend>
 
 
   <export>

@@ -19,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   cnr_controller_interface
   actionlib
   control_msgs
+  rosdyn_chain_state
 )
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -32,7 +33,7 @@ endif()
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES scaled_fjt_controller
-  CATKIN_DEPENDS actionlib cnr_controller_interface control_msgs roscpp name_sorting cnr_controller_interface control_msgs controller_interface
+  CATKIN_DEPENDS actionlib cnr_controller_interface control_msgs roscpp name_sorting cnr_controller_interface control_msgs controller_interface rosdyn_chain_state
   DEPENDS
 )
 include_directories(

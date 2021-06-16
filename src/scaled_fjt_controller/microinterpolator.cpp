@@ -56,7 +56,13 @@ bool Microinterpolator::interpolate(const ros::Duration& time, trajectory_msgs::
   
   if ((time-m_trj->points.back().time_from_start).toSec()>=0)
   {
+    unsigned int nAx=m_trj->points.back().positions.size();
     pnt=m_trj->points.back();
+    for (unsigned int iAx=0;iAx<nAx;iAx++)
+    {
+      pnt.velocities.at(iAx)=0;
+      pnt.accelerations.at(iAx)=0;
+    }
     pnt.effort.resize(m_trj->points.back().positions.size(),0);
     return true;
   }
