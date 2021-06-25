@@ -23,6 +23,9 @@
   <depend>name_sorting</depend>
   <depend>controller_interface</depend>
   <depend>rosdyn_chain_state</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>rosdyn_core</depend>
+
 
 
   <export>

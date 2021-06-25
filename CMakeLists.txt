@@ -33,7 +33,7 @@ endif()
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES scaled_fjt_controller
-  CATKIN_DEPENDS actionlib cnr_controller_interface control_msgs roscpp name_sorting cnr_controller_interface control_msgs controller_interface rosdyn_chain_state
+  CATKIN_DEPENDS cnr_logger rosdyn_core trajectory_msgs actionlib control_msgs roscpp name_sorting cnr_controller_interface controller_interface rosdyn_chain_state
   DEPENDS
 )
 include_directories(
