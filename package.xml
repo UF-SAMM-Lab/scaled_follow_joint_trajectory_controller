@@ -25,6 +25,7 @@
   <depend>rosdyn_chain_state</depend>
   <depend>trajectory_msgs</depend>
   <depend>rosdyn_core</depend>
+  <depend>cnr_logger</depend>
 
 
 
