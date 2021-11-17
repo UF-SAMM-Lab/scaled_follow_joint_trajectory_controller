@@ -40,9 +40,9 @@ bool ScaledFJTController<H,T>::doInit()
 
   std::string what;
   // ^^^^^^
-  rosdyn::VectorXd goal_tolerance;  //it may be a double or a eigen::vector
-  eu::setConstant(goal_tolerance, 0.001);
-  if(!rosparam_utilities::getParam(this->getControllerNh(), "goal_tolerance", goal_tolerance, what, &goal_tolerance))
+  m_goal_tolerance.resize(this->getPosition().size());
+  eu::setConstant(m_goal_tolerance, 0.001);
+  if(!rosparam_utilities::getParam(this->getControllerNh(), "goal_tolerance", m_goal_tolerance, what, &m_goal_tolerance))
   {
     CNR_ERROR(this->logger(), "Error in getting the goal tolerance: " << what);
     CNR_RETURN_FALSE(this->logger());
@@ -65,6 +65,12 @@ bool ScaledFJTController<H,T>::doInit()
     overrides.push_back("/speed_ovr");
     overrides.push_back("/safe_ovr_1");
     overrides.push_back("/safe_ovr_2");
+  }
+
+  if (!this->getControllerNh().getParam("check_tolerance",m_check_tolerance))
+  {
+    CNR_DEBUG(this->logger(),"check_tolerance are not speficied for controllers. Using default (true)");
+    m_check_tolerance=true;
   }
 
   CNR_TRACE(this->logger(),"subscribe override topics");
@@ -201,8 +207,13 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
     unscaled_js_msg->header.stamp  = ros::Time::now();
     this->publish(m_unscaled_pub_id,unscaled_js_msg);
 
+    m_is_in_tolerance=true;
+    rosdyn::VectorXd actual_position = this->getPosition( );
+
     for (size_t iAx=0;iAx<this->nAx();iAx++)
     {
+      if (m_check_tolerance)
+        m_is_in_tolerance &= std::abs(m_currenct_point.positions.at(iAx)-actual_position(iAx))<m_goal_tolerance(iAx);
       this->setCommandPosition     (m_currenct_point.positions.at(iAx),iAx);
       this->setCommandVelocity     (m_currenct_point.velocities.at(iAx),iAx);
       this->setCommandAcceleration (m_currenct_point.accelerations.at(iAx),iAx);

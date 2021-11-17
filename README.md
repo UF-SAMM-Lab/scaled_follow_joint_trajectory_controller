@@ -11,7 +11,7 @@ The default action name is: /[ROBOTHW_NAME]/[CONTROLLER_NAME]/follow_joint_traje
 You may want to remap it to the name defined in MoveIt!
 
 ### override
-The controller subscribes several override topics. 
+The controller subscribes several override topics.
 
 For each override topic, a std_msgs/Int64 message could be sent. The message is a number between 0 and 100 (values outside the limits are saturated in the range 0-100), which scale the velocity, the acceleration, and time of the trajectory.
 
@@ -42,7 +42,7 @@ The controller publishes:
     controlled_joints: all
 
     ## OPTIONAL PARAMETERS
-    continuity_order: 1 # optional [default=1]. Continuity order of the trajectory. 
+    continuity_order: 1 # optional [default=1]. Continuity order of the trajectory.
     # 1 velocity is continouos [you should use this one if are using the default_planner_request_adapters/AddTimeParameterization in moveit_config]
     # 2 acceleration is continouos
     # 3 jerk is continouos
@@ -50,6 +50,7 @@ The controller publishes:
     overrides: ["ovr1", "ovr2", "ovr3"] #optional (default= [speed_ovr,safe_ovr_1,safe_ovr2])
     goal_tolerance: 0.001 # optional (default=0.001). it you be a scalar or any array with a value for each joint
     path_tolerance: 0.001 # optional (default=0.001). it you be a scalar or any array with a value for each joint
+    check_tolerance: true # optional (default=true). if true, goal ends when the joint states and targets are in tolerance. Use false if there is a compliant controller in the loop.
 ```
 
 Scaled_fjt_controller is continuosly evolving. If you find errors or if you have some suggestions, [please let us know](https://github.com/JRL-CARI-CNR-UNIBS/online_replanner/issues).
