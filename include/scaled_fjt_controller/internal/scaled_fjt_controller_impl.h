@@ -208,17 +208,39 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
     this->publish(m_unscaled_pub_id,unscaled_js_msg);
 
     m_is_in_tolerance=true;
-    rosdyn::VectorXd actual_position = this->getPosition( );
-
     for (size_t iAx=0;iAx<this->nAx();iAx++)
     {
-      if (m_check_tolerance)
-        m_is_in_tolerance &= std::abs(m_currenct_point.positions.at(iAx)-actual_position(iAx))<m_goal_tolerance(iAx);
       this->setCommandPosition     (m_currenct_point.positions.at(iAx),iAx);
       this->setCommandVelocity     (m_currenct_point.velocities.at(iAx),iAx);
       this->setCommandAcceleration (m_currenct_point.accelerations.at(iAx),iAx);
       this->setCommandEffort       (m_currenct_point.effort.at(iAx),iAx);
     }
+    rosdyn::VectorXd actual_position = this->getPosition( );
+    rosdyn::VectorXd actual_target_position = this->getCommandPosition( );
+
+    if (m_check_tolerance)
+    {
+      if (m_goal_tolerance.size()==1)
+      {
+        m_is_in_tolerance = (actual_target_position-actual_position).cwiseAbs().maxCoeff()<m_goal_tolerance(0);
+      }
+      else
+      {
+        m_is_in_tolerance = (((actual_target_position-actual_position).cwiseAbs()-m_goal_tolerance).array()<0.0).all();
+      }
+    }
+    if (m_is_in_tolerance)
+      ROS_INFO_STREAM_THROTTLE(1,
+                               "\n error = " << (actual_target_position-actual_position).transpose() <<
+                               "\n tolerance = " << m_goal_tolerance.transpose());
+    else
+      ROS_WARN_STREAM_THROTTLE(1,
+                               "\n actual_target_position = " << (actual_target_position).transpose() <<
+                               "\n actual_position = " << (actual_position).transpose() <<
+                               "\n error = " << (actual_target_position-actual_position).transpose() <<
+                               "\n tolerance = " << m_goal_tolerance.transpose());
+
+
   }
   catch (std::exception& e)
   {
