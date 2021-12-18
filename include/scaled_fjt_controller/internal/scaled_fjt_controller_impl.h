@@ -145,6 +145,11 @@ bool ScaledFJTController<H,T>::doStarting(const ros::Time& /*time*/)
   m_microinterpolator->setSplineOrder(spline_order);
   CNR_TRACE(this->logger(),"Starting interpolator with continuity order = \n" << spline_order);
 
+  last_target_velocity_.resize(this->nAx());
+  last_target_velocity_.setZero();
+  last_target_position_.resize(this->nAx());
+  last_target_position_.setZero();
+
   m_as->start();
   CNR_RETURN_TRUE(this->logger());
 }
@@ -176,7 +181,18 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
 
   try
   {
-    m_scaled_time += period * m_global_override;
+    rosdyn::VectorXd last_saturated_target_velocity=this->getCommandVelocity();
+    rosdyn::VectorXd last_saturated_target_position=this->getCommandPosition();
+
+    double saturated_override=last_saturated_target_velocity.norm()/last_target_velocity_.norm();
+    double error=(last_target_position_-last_saturated_target_position).norm();
+    if (error>1.0e-3)
+    {
+      saturated_override*=(1.0-(error-1.0e-3)/1.0e-2);
+    }
+    saturated_override=std::min(1.0,std::max(0.0,saturated_override));
+
+    m_scaled_time += period * m_global_override*saturated_override;
     m_time        += period;
     std_msgs::Float64Ptr scaled_msg(new std_msgs::Float64());
     scaled_msg->data=m_scaled_time.toSec();
@@ -224,6 +240,8 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
     this->setCommandVelocity(target_velocity);
     this->setCommandAcceleration(target_acceleration);
     this->setCommandEffort(target_effort);
+    last_target_velocity_=target_velocity;
+    last_target_position_=target_position;
 
     rosdyn::VectorXd actual_position = this->getPosition( );
 

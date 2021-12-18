@@ -79,7 +79,8 @@ protected:
   std::map<std::string,double> m_overrides;
   std::vector<ros::Subscriber> m_override_topic;
   double m_global_override;
-
+  rosdyn::VectorXd last_target_velocity_;
+  rosdyn::VectorXd last_target_position_;
   int m_is_finished;
   std::mutex m_mtx;
 
