@@ -53,7 +53,7 @@ class ScaledFJTPosController : public
 public:
   ScaledFJTPosController( )
   {
-    this->setPriority(this->Q_PRIORITY);
+    this->setPriority(this->NONE);
   }
 };
 

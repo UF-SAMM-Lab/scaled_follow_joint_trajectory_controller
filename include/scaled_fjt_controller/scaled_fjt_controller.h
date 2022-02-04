@@ -79,6 +79,12 @@ protected:
   std::map<std::string,double> m_overrides;
   std::vector<ros::Subscriber> m_override_topic;
   double m_global_override;
+  rosdyn::VectorXd last_target_velocity_;
+  rosdyn::VectorXd last_trajectory_target_velocity_; // without clik contribution
+  rosdyn::VectorXd last_target_position_;
+  double k_clik_;
+  bool use_time_compensation_;
+  bool use_saturation_override_;
 
   int m_is_finished;
   std::mutex m_mtx;

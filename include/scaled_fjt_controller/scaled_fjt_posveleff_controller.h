@@ -52,7 +52,7 @@ public:
   bool doInit()
   {
     CNR_TRACE_START(this->logger());
-    this->setPriority(this->QD_PRIORITY);
+    this->setPriority(this->NONE);
     bool ret = ScaledFJTController<hardware_interface::PosVelEffJointHandle, hardware_interface::PosVelEffJointInterface>::doInit();
     CNR_RETURN_BOOL(this->logger(), ret);
   }

@@ -67,6 +67,20 @@ bool ScaledFJTController<H,T>::doInit()
     overrides.push_back("/safe_ovr_2");
   }
 
+  if (!this->getControllerNh().getParam("clik_gain",k_clik_))
+  {
+    k_clik_=0.0;
+  }
+  if (!this->getControllerNh().getParam("saturation_override",use_saturation_override_))
+  {
+    use_saturation_override_=false;
+  }
+  if (!this->getControllerNh().getParam("time_compensation",use_time_compensation_))
+  {
+    use_time_compensation_=false;
+  }
+
+
   if (!this->getControllerNh().getParam("check_tolerance",m_check_tolerance))
   {
     CNR_DEBUG(this->logger(),"check_tolerance are not speficied for controllers. Using default (true)");
@@ -75,7 +89,6 @@ bool ScaledFJTController<H,T>::doInit()
 
   CNR_TRACE(this->logger(),"subscribe override topics");
 
-  ros::NodeHandle controller_nh("foo");
   for (const std::string& override_name: overrides)
   {
     auto cb=boost::bind(&cnr::control::ScaledFJTController<H,T>::overrideCallback,this,_1,override_name);
@@ -145,6 +158,13 @@ bool ScaledFJTController<H,T>::doStarting(const ros::Time& /*time*/)
   m_microinterpolator->setSplineOrder(spline_order);
   CNR_TRACE(this->logger(),"Starting interpolator with continuity order = \n" << spline_order);
 
+  last_target_velocity_.resize(this->nAx());
+  last_target_velocity_.setZero();
+  last_target_position_.resize(this->nAx());
+  last_target_position_.setZero();
+  last_trajectory_target_velocity_.resize(this->nAx());
+  last_trajectory_target_velocity_.setZero();
+
   m_as->start();
   CNR_RETURN_TRUE(this->logger());
 }
@@ -153,10 +173,70 @@ template<class H, class T>
 bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Duration& period)
 {
   CNR_TRACE_START_THROTTLE_DEFAULT(this->logger());
+  rosdyn::VectorXd last_saturated_target_velocity=this->getCommandVelocity();
+  rosdyn::VectorXd last_saturated_target_position=this->getCommandPosition();
+
+  rosdyn::VectorXd target_position(this->nAx());
+  rosdyn::VectorXd target_velocity(this->nAx());
+  rosdyn::VectorXd target_acceleration(this->nAx());
+  rosdyn::VectorXd target_effort(this->nAx());
+
+  double saturation_override=1.0;
   try
   {
+
+    /*******************************************************************
+     *                          TIME COMPENSATION                      *
+     * if there was a saturation, bring back the scaled time           *
+     * proportionally to the ratio between the error in the trajectory *
+     * direction and the trajectory velocity                           *
+     * v=dx/dt -> t = t - alpha*dx/v. alpha to avoid overcompensation  *
+     *******************************************************************/
+    if (use_time_compensation_)
+    {
+      double trj_error=(last_target_position_-last_saturated_target_position).dot(last_trajectory_target_velocity_.normalized());
+      if (last_trajectory_target_velocity_.norm()>0)
+      {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_scaled_time-=ros::Duration(std::max(0.0,std::min(period.toSec(),0.5*trj_error/last_trajectory_target_velocity_.norm())));
+        if (m_scaled_time.toSec()<0.0)
+          m_scaled_time=ros::Duration(0.0);
+      }
+    }
+
+    trajectory_msgs::JointTrajectoryPoint actual_point;
+    if( !m_microinterpolator->interpolate(m_scaled_time,actual_point,1) )
+    {
+      CNR_ERROR_THROTTLE(this->logger(),0.5,"something wrong in interpolation.");
+      CNR_RETURN_FALSE(this->logger());
+    }
+    for (size_t iAx=0;iAx<this->nAx();iAx++)
+    {
+      target_position(iAx)     = actual_point.positions.at(iAx);
+    }
+    /*******************************************************************
+     *                          SATURATION OVERRIDE                    *
+     * if the error is too high, slow down the trajectory to recover   *
+     * use a log scale                                                 *
+     * error = 1.0e-1 -> override = 0.0                                *
+     * error = 1.0e-2 -> override = 0.33                               *
+     * error = 1.0e-3 -> override = 0.66                               *
+     * error = 1.0e-4 -> override = 1.00                               *
+     *******************************************************************/
+    if (use_saturation_override_)
+    {
+      double error=(target_position-last_saturated_target_position).norm();
+      if (error>1.0e-4)
+      {
+        double log10=std::log10(error);  //>=-4
+        saturation_override=std::max(0.0,1.0-(log10-(-4.0))/3.0);
+      }
+    }
+
+
+
     std::lock_guard<std::mutex> lock(m_mtx);
-    if( !m_microinterpolator->interpolate(m_scaled_time,m_currenct_point,m_global_override) )
+    if( !m_microinterpolator->interpolate(m_scaled_time,m_currenct_point,m_global_override*saturation_override) )
     {
       CNR_ERROR_THROTTLE(this->logger(),0.5,"something wrong in interpolation.");
       CNR_ERROR_THROTTLE(this->logger(),0.5, "scaled time     = "  << m_scaled_time);
@@ -176,8 +256,20 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
 
   try
   {
-    m_scaled_time += period * m_global_override;
+
+
+    /*******************************************************************
+     *                              CLIK                               *
+     * add  a velocity component proportional to the error             *
+     * between the actual target position (using the compensated time) *
+     * and the last saturated target position                          *
+     ******************************************************************/
+    rosdyn::VectorXd clik_velocity=k_clik_*(target_position-last_saturated_target_position);
+
+    m_mtx.lock();
+    m_scaled_time += period * m_global_override*saturation_override;
     m_time        += period;
+    m_mtx.unlock();
     std_msgs::Float64Ptr scaled_msg(new std_msgs::Float64());
     scaled_msg->data=m_scaled_time.toSec();
     this->publish(m_scaled_pub_id,scaled_msg);
@@ -208,10 +300,7 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
     this->publish(m_unscaled_pub_id,unscaled_js_msg);
 
     m_is_in_tolerance=true;
-    rosdyn::VectorXd target_position(this->nAx());
-    rosdyn::VectorXd target_velocity(this->nAx());
-    rosdyn::VectorXd target_acceleration(this->nAx());
-    rosdyn::VectorXd target_effort(this->nAx());
+
 
     for (size_t iAx=0;iAx<this->nAx();iAx++)
     {
@@ -220,10 +309,14 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
       target_acceleration(iAx) = m_currenct_point.accelerations.at(iAx);
       target_effort(iAx)       = m_currenct_point.effort.at(iAx);
     }
+    last_trajectory_target_velocity_=target_velocity;
+    target_velocity+=clik_velocity;
     this->setCommandPosition(target_position);
     this->setCommandVelocity(target_velocity);
     this->setCommandAcceleration(target_acceleration);
     this->setCommandEffort(target_effort);
+    last_target_velocity_=target_velocity;
+    last_target_position_=target_position;
 
     rosdyn::VectorXd actual_position = this->getPosition( );
 
