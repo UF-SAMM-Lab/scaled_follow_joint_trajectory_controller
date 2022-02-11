@@ -9,6 +9,7 @@
 #include <sensor_msgs/JointState.h>
 
 #include <scaled_fjt_controller/scaled_fjt_controller.h>
+##include <rosparam_utilities/rosparam_utilities.h>
 
 namespace eu = eigen_utils;
 
@@ -586,4 +587,3 @@ void ScaledFJTController<H,T>::actionCancelCallback(
 
 }  // namespace control
 }  // namespace cnr
-
