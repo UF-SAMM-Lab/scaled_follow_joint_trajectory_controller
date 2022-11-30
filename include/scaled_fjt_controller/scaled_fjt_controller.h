@@ -46,6 +46,10 @@
 #include <eigen_matrix_utils/eigen_matrix_utils.h>
 #include <cnr_controller_interface/cnr_joint_command_controller_interface.h>
 #include <scaled_fjt_controller/microinterpolator.h>
+#include <hardware_interface/joint_state_interface.h>
+#include <hardware_interface/posvelacc_command_interface.h>
+#include <hardware_interface/robot_hw.h>
+#include <hardware_interface/joint_command_interface.h>
 
 namespace cnr
 {

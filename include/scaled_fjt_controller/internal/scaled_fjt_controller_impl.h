@@ -10,6 +10,10 @@
 
 #include <scaled_fjt_controller/scaled_fjt_controller.h>
 #include <rosparam_utilities/rosparam_utilities.h>
+#include <hardware_interface/joint_state_interface.h>
+#include <hardware_interface/posvelacc_command_interface.h>
+#include <hardware_interface/robot_hw.h>
+#include <hardware_interface/joint_command_interface.h>
 
 namespace eu = eigen_utils;
 
@@ -39,6 +43,7 @@ bool ScaledFJTController<H,T>::doInit()
 {
   CNR_TRACE_START(this->logger());
 
+  CNR_INFO(this->logger(),"scaledfjt doinit");
   std::string what;
   // ^^^^^^
   m_goal_tolerance.resize(this->getPosition().size());
@@ -302,14 +307,20 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
 
     m_is_in_tolerance=true;
 
+    std::string p = "";
+    std::string v = "";
 
     for (size_t iAx=0;iAx<this->nAx();iAx++)
     {
       target_position(iAx)     = m_currenct_point.positions.at(iAx);
+      p+= std::to_string(target_position(iAx)) + ",";
       target_velocity(iAx)     = m_currenct_point.velocities.at(iAx);
+      v+= std::to_string(target_velocity(iAx)) + ",";
       target_acceleration(iAx) = m_currenct_point.accelerations.at(iAx);
       target_effort(iAx)       = m_currenct_point.effort.at(iAx);
     }
+
+    // ROS_INFO_STREAM("p:"<<p<<"-v:"<<v);
     last_trajectory_target_velocity_=target_velocity;
     target_velocity+=clik_velocity;
     this->setCommandPosition(target_position);
@@ -430,6 +441,10 @@ void ScaledFJTController<H,T>::actionServerThread()
 
       break;
     }
+
+    // std::string in_tol = "in tol";
+    // if (!m_is_in_tolerance) in_tol = "not in tol";
+    // CNR_INFO(this->logger(), "done?:"<<(m_scaled_time-m_microinterpolator->trjTime()).toSec()<<","<<in_tol);
 
     if ((m_is_finished==1) || (((m_scaled_time-m_microinterpolator->trjTime()).toSec()>0) && m_is_in_tolerance))
     {

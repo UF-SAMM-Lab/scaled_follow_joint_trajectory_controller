@@ -1,5 +1,9 @@
 #pragma once // workaround qtcreator clang-tidy
 #include <trajectory_msgs/JointTrajectory.h>
+#include <hardware_interface/joint_state_interface.h>
+#include <hardware_interface/posvelacc_command_interface.h>
+#include <hardware_interface/robot_hw.h>
+#include <hardware_interface/joint_command_interface.h>
 #include <ros/console.h>
 
 namespace cnr
