@@ -50,7 +50,10 @@
 #include <hardware_interface/posvelacc_command_interface.h>
 #include <hardware_interface/robot_hw.h>
 #include <hardware_interface/joint_command_interface.h>
+#include <trajectory_msgs/JointTrajectory.h>
 
+
+typedef Eigen::Array<bool,Eigen::Dynamic,1> ArrayXb;
 namespace cnr
 {
 namespace control
@@ -74,7 +77,8 @@ protected:
   void actionGoalCallback(actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::GoalHandle gh);
   void actionCancelCallback(actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::GoalHandle gh);
   void overrideCallback(const std_msgs::Int64ConstPtr& msg, const std::string& override_name);
-
+  void blendTrajCallback(const trajectory_msgs::JointTrajectoryConstPtr& trajectory);
+  void blend_time_parameterize(trajectory_msgs::JointTrajectory &plan);
 
   size_t m_scaled_pub_id;
   size_t m_ratio_pub_id;
@@ -102,6 +106,7 @@ protected:
   bool m_check_tolerance=true;
   ros::Duration m_scaled_time;
   ros::Duration m_time;
+  ros::Duration last_period;
   trajectory_msgs::JointTrajectoryPoint m_currenct_point;
   std::shared_ptr<cnr::control::Microinterpolator> m_microinterpolator;
   rosdyn::VectorXd m_goal_tolerance;  //it may be a double or a eigen::vector

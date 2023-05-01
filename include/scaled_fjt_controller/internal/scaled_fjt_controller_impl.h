@@ -7,6 +7,7 @@
 #include <std_msgs/Int64.h>
 #include <std_msgs/Float64.h>
 #include <sensor_msgs/JointState.h>
+#include <trajectory_msgs/JointTrajectory.h>
 
 #include <scaled_fjt_controller/scaled_fjt_controller.h>
 #include <rosparam_utilities/rosparam_utilities.h>
@@ -14,6 +15,7 @@
 #include <hardware_interface/posvelacc_command_interface.h>
 #include <hardware_interface/robot_hw.h>
 #include <hardware_interface/joint_command_interface.h>
+#include <moveit/trajectory_processing/iterative_time_parameterization.h>
 
 namespace eu = eigen_utils;
 
@@ -104,6 +106,12 @@ bool ScaledFJTController<H,T>::doInit()
   }
   m_global_override=1.0;
   m_is_in_tolerance=true;
+
+
+  CNR_TRACE(this->logger(),"subscribe blend topic");
+
+  auto blend_cb=boost::bind(&cnr::control::ScaledFJTController<H,T>::blendTrajCallback,this,_1);
+  this->template add_subscriber<trajectory_msgs::JointTrajectory>("blend_trajectory",1,blend_cb,false);
 
   CNR_TRACE(this->logger(),"create publisher");
   m_scaled_pub_id   = this->template add_publisher<std_msgs::Float64>("scaled_time",1);
@@ -276,6 +284,7 @@ bool ScaledFJTController<H,T>::doUpdate(const ros::Time& time, const ros::Durati
     m_scaled_time += period * m_global_override*saturation_override;
     m_time        += period;
     m_mtx.unlock();
+    last_period = period;
     std_msgs::Float64Ptr scaled_msg(new std_msgs::Float64());
     scaled_msg->data=m_scaled_time.toSec();
     this->publish(m_scaled_pub_id,scaled_msg);
@@ -442,6 +451,11 @@ void ScaledFJTController<H,T>::actionServerThread()
       break;
     }
 
+    // if (m_start_new_blend_traj) {
+    //   CNR_INFO(this->logger(), "ending interpolation of current trajectory to start new blend trajectory");
+    //   m_start_new_blend_traj = false;
+    //   break;
+    // }
     // std::string in_tol = "in tol";
     // if (!m_is_in_tolerance) in_tol = "not in tol";
     // CNR_INFO(this->logger(), "done?:"<<(m_scaled_time-m_microinterpolator->trjTime()).toSec()<<","<<in_tol);
@@ -471,6 +485,89 @@ void ScaledFJTController<H,T>::actionServerThread()
   }
   m_gh.reset();
   CNR_DEBUG(this->logger(), "START ACTION GOAL END");
+}
+
+template<class H, class T>
+void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTrajectoryConstPtr& trajectory)
+{
+  CNR_INFO(this->logger(), "Received a new blend trajectory");
+  unsigned  int nPnt = trajectory->points.size();
+
+  if (nPnt == 0)
+  {
+    CNR_INFO(this->logger(),"BLEND TRAJECTORY WITH NO POINT");
+    return;
+  }
+  try
+  {
+    trajectory_msgs::JointTrajectory tmp_traj;
+    tmp_traj.joint_names = trajectory->joint_names;
+    std::lock_guard<std::mutex> lock(m_mtx);
+    if(!m_microinterpolator->interpolate(m_scaled_time,m_currenct_point,m_global_override*1.0) )
+    {
+      CNR_ERROR(this->logger(), "Couldn't interpolate next point");
+    }
+
+    tmp_traj.points.push_back(m_currenct_point);
+    ros::Duration original_time_from_start = trajectory->points.front().time_from_start;
+    tmp_traj.points.push_back(trajectory->points.front());
+    tmp_traj.points.front().time_from_start = ros::Duration(0.0);
+    
+    blend_time_parameterize(tmp_traj);
+    //append the rest of trajectory to tmp_traj
+
+
+    //now loop and fix start times
+    for (int i=1;i<trajectory->points.size();i++) {
+      tmp_traj.points.push_back(trajectory->points[i]);
+      tmp_traj.points.back().time_from_start = tmp_traj.points.back().time_from_start-original_time_from_start+tmp_traj.points[1].time_from_start;
+    }
+    std::cout<<tmp_traj<<std::endl;
+
+    trajectory_msgs::JointTrajectoryPtr trj(new trajectory_msgs::JointTrajectory());
+
+    if (!trajectory_processing::sort_trajectory(this->jointNames(), tmp_traj, *trj))
+    {
+      CNR_ERROR(this->logger(), "Blend - Names are different");
+      return;
+    }
+
+  
+    CNR_INFO(this->logger(), "Starting managing new blend trajectory, trajectory has " << trj->points.size() << " points");
+    m_microinterpolator->setTrajectory(trj);
+    m_scaled_time=ros::Duration(0);
+    m_time=ros::Duration(0);
+    m_is_finished=0;
+
+    std::stringstream ss1;
+    ss1 << "[ ";
+    for(const auto & q : trj->points.front().positions)
+    {
+      ss1 << std::to_string(q) << " "; ss1 << "]";
+    }
+    std::stringstream ss2;
+    ss2 << "[ ";
+    for(const auto & qd : trj->points.front().velocities)
+    {
+      ss2 << std::to_string(qd) << " ";  ss2 << "]";
+    }
+    CNR_INFO(this->logger(), "First Point of the trajectory:\n q : " + ss1.str() + "\n" + " qd:" + ss2.str());
+    // m_start_new_blend_traj = 1;
+  }
+  catch(std::exception& e)
+  {
+    CNR_INFO(this->logger(), "Set Trajectory Failed");
+  }
+
+  // joinActionServerThread();
+
+  // m_as_thread = std::thread(&ScaledFJTController<H,T>::actionServerThread, this);
+
+  m_mtx.lock();
+  m_scaled_time += last_period * m_global_override*1.0;
+  m_time        += last_period;
+  m_mtx.unlock();
+
 }
 
 template<class H, class T>
@@ -598,6 +695,173 @@ void ScaledFJTController<H,T>::actionCancelCallback(
     CNR_WARN(this->logger(), "No goal to cancel");
   }
   CNR_RETURN_OK(this->logger(), void());
+}
+
+
+template<class H, class T>
+void ScaledFJTController<H,T>::blend_time_parameterize(trajectory_msgs::JointTrajectory &plan) {
+  // vel_profile.clear();
+  Eigen::ArrayXd max_vels_ = this->chain().getDQMax().array();
+  Eigen::ArrayXd max_accels_ = this->chain().getDDQMax().array();
+  // std::cout<<"max vels:"<<max_vels_<<std::endl;
+  double last_end_time = 0.0;
+  int dof = plan.points[0].positions.size();
+  for (int i=1;i<plan.points.size();i++) {
+    // std::cout<<"starting: "<<i<<","<<plan.points.size()<<","<<plan.points[i-1].positions.size()<<","<<plan.points[i].positions.size()<<std::endl;
+    // std::cout<<plan.points[i-1]<<std::endl;
+    // std::cout<<plan.points[i]<<std::endl;
+    Eigen::ArrayXd q_start(dof);
+    for (int q=0;q<dof;q++) q_start[q] = plan.points[i-1].positions[q];
+    Eigen::ArrayXd q_end(dof);
+    for (int q=0;q<dof;q++) q_end[q] = plan.points[i].positions[q];
+    Eigen::ArrayXd q_dot_start(dof);
+    for (int q=0;q<dof;q++) q_dot_start[q] = plan.points[i-1].velocities[q];
+    Eigen::ArrayXd q_dot_end(dof);
+    for (int q=0;q<dof;q++) q_dot_end[q] = plan.points[i].velocities[q];
+    Eigen::ArrayXd diff = q_end-q_start;
+    Eigen::ArrayXd abs_diff = diff.abs();
+    Eigen::ArrayXd sgn1 = Eigen::ArrayXd::Zero(abs_diff.size());
+    for (int q=0;q<dof;q++) sgn1[q] = 1.0*(diff[q]>0.0)-1.0*(diff[q]<0.0);
+    // std::cout<<"sgn1"<<sgn1<<std::endl;
+    Eigen::ArrayXd times_acc_to_full_speed = ((sgn1*max_vels_-q_dot_start)/max_accels_).abs();
+    double time_acc_to_full_speed = times_acc_to_full_speed.maxCoeff();
+    Eigen::ArrayXd times_to_decc_from_full_speed = ((sgn1*max_vels_-q_dot_end)/max_accels_).abs();
+    double time_to_decc_from_full_speed = times_to_decc_from_full_speed.matrix().maxCoeff();
+    Eigen::ArrayXd dq_to_full_speed = 0.5*sgn1*max_accels_*times_acc_to_full_speed*times_acc_to_full_speed+q_dot_start*times_acc_to_full_speed;
+    Eigen::ArrayXd dq_full_to_next_speed = -0.5*sgn1*max_accels_*times_to_decc_from_full_speed*times_to_decc_from_full_speed+sgn1*max_vels_*times_to_decc_from_full_speed;
+    Eigen::ArrayXd dq_tot = dq_to_full_speed+dq_full_to_next_speed;
+    Eigen::ArrayXd full_spd_q = diff.abs()-dq_tot.abs();
+    Eigen::ArrayXd times_at_full_spd = full_spd_q/max_vels_;
+    Eigen::ArrayXd full_spd_tot_times = times_at_full_spd+times_acc_to_full_speed+times_to_decc_from_full_speed;
+    double full_spd_tot_time = 0.0;
+    int full_spd_jnt = 0;
+    for (int q=0;q<dof;q++) {
+      if (full_spd_tot_times[q]>full_spd_tot_time) {
+        full_spd_tot_time = full_spd_tot_times[q];
+        full_spd_jnt = q;
+      }
+    }
+    ArrayXb may_go_too_fast = (full_spd_tot_time*q_dot_start).array().abs()>abs_diff.array();
+    // for (int q=0;q<may_go_too_fast.size();q++) {
+    //   if (may_go_too_fast[q]) sgn1[q]=-sgn1[q];
+    // }
+    Eigen::ArrayXd accel_stop_time = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd deccel_start_time = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd accelerations = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd deccelerations = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd t1_ = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd t2_ = Eigen::ArrayXd::Zero(6);
+    Eigen::ArrayXd alt_a = Eigen::ArrayXd::Zero(6);
+
+    ArrayXb spd_limit_jnts = ArrayXb::Constant(6,true);
+    if (times_at_full_spd[full_spd_jnt]>0) {
+      spd_limit_jnts[full_spd_jnt] = false;
+      accelerations[full_spd_jnt] = max_accels_[full_spd_jnt];
+      deccelerations[full_spd_jnt] = max_accels_[full_spd_jnt];
+      accel_stop_time[full_spd_jnt] = times_acc_to_full_speed[full_spd_jnt];
+      deccel_start_time[full_spd_jnt] = times_acc_to_full_speed[full_spd_jnt]+times_at_full_spd[full_spd_jnt];
+      double mid_t = times_acc_to_full_speed[full_spd_jnt]+0.5*times_at_full_spd[full_spd_jnt];
+      Eigen::ArrayXd c = (sgn1*max_vels_-q_dot_start)/(sgn1*max_vels_-q_dot_end);
+      t2_ = (diff-full_spd_tot_time*sgn1*max_vels_)/(0.5*(c*c-1)*(q_dot_end-q_dot_start)/(c-1)+c*(q_dot_start-sgn1*max_vels_));
+      Eigen::ArrayXd alt_t2 = (diff-full_spd_tot_time*sgn1*max_vels_)/(q_dot_start-sgn1*max_vels_);
+      for (int q=0;q<dof;q++) {
+        if (c[q]==1.0) {
+          t2_[q] = alt_t2[q];
+        }
+      }
+      t1_ = c*t2_;
+      alt_a = ((q_dot_end-q_dot_start)/(c-1)/t2_).abs();
+      Eigen::ArrayXd alt_alt_a = ((sgn1*max_vels_-q_dot_start)/c/t2_).abs();
+      for (int q=0;q<dof;q++) {
+        if (c[q]==1.0) {
+          alt_a[q] = alt_alt_a[q];
+        }
+      }
+    }
+    // std::cout<<"full spd time:"<<full_spd_tot_time<<std::endl;
+    Eigen::ArrayXd qm_dot = max_vels_;
+    Eigen::ArrayXd tm;
+    Eigen::ArrayXd t_fm;
+    Eigen::ArrayXd sgn = sgn1;
+    Eigen::ArrayXd avg_spd_times = abs_diff/(0.5*(q_dot_end+q_dot_start).abs());
+    while ((qm_dot>0).all()) {
+      sgn = sgn1;
+      tm = (sgn*qm_dot-q_dot_start).abs()/max_accels_;
+      t_fm = (sgn*qm_dot-q_dot_end).abs()/max_accels_;
+      for (int q=0;q<dof;q++) {
+        if (spd_limit_jnts[q]) {
+          if ((tm[q]+t_fm[q])>avg_spd_times[q]) sgn[q] = -sgn1[q];
+        }
+      }
+      tm = (sgn*qm_dot-q_dot_start).abs()/max_accels_;
+      t_fm = (sgn*qm_dot-q_dot_end).abs()/max_accels_;
+      Eigen::ArrayXd diff2 = 0.5*max_accels_*(tm*tm-t_fm*t_fm)+qm_dot*t_fm+q_dot_start*tm;
+      ArrayXb diff_bool = ((abs_diff-diff2.abs())>=0);
+      if (diff_bool.all()) break;
+      for (int q=0;q<qm_dot.size();q++) {
+        if (!diff_bool[q]) qm_dot[q]-=0.01;
+      }
+    }
+    Eigen::ArrayXd tot_time = tm + t_fm;
+    double max_tot_time = 0.0;
+    int limit_joint = 0;
+    for (int q=0;q<dof;q++) {
+      if (tot_time[q]>max_tot_time) {
+        max_tot_time = tot_time[q];
+        limit_joint = q;
+      }
+    }
+    double mid_time = tm[limit_joint];
+    double end_time = tot_time[limit_joint];
+    if (times_at_full_spd[full_spd_jnt]>0) {
+      end_time = full_spd_tot_time;
+      mid_time = 0.5*end_time;
+    }
+    Eigen::MatrixXd knowns = Eigen::MatrixXd::Zero(2,diff.size());
+    knowns.row(0) = (diff-end_time*q_dot_start).matrix();
+    knowns.row(1) = (q_dot_end-q_dot_start).matrix();
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(2,2);
+    A(0,0) = 0.5*mid_time*mid_time+mid_time*(end_time-mid_time);
+    A(0,1) = -0.5*(end_time-mid_time)*(end_time-mid_time);
+    A(1,0) = mid_time;
+    A(1,1) = -(end_time-mid_time);
+    Eigen::MatrixXd a_d = A.inverse()*knowns;
+    // std::cout<<"knowns"<<knowns<<std::endl;
+    // std::cout<<"A"<<A<<std::endl;
+    // std::cout<<"a_d"<<a_d<<std::endl;
+    for (int q=0;q<dof;q++) {
+      if (spd_limit_jnts[q]) {
+        accelerations[q] = abs(a_d(0,q));
+        deccelerations[q] = abs(a_d(1,q));
+        accel_stop_time[q] = mid_time;
+        deccel_start_time[q] = mid_time;
+      }
+    }
+    Eigen::ArrayXd mid_spds = q_dot_start+mid_time*a_d.row(0).transpose().array();
+    ArrayXb tmp_comparitor = (mid_spds.abs()>max_vels_);
+    for (int q=0;q<dof;q++) {
+      if (spd_limit_jnts[q] && tmp_comparitor[q]) {
+          accel_stop_time[q] = t1_[q];
+          deccel_start_time[q] = full_spd_tot_time-t2_[q];
+          accelerations[q] = alt_a[q];
+          deccelerations[q] = alt_a[q];
+          // std::cout<<q<<",a:"<<accelerations[q]<<std::endl;
+          // std::cout<<q<<",d:"<<deccelerations[q]<<std::endl;
+      }
+    }
+    if (times_at_full_spd[full_spd_jnt]>0) {
+      mid_spds[full_spd_jnt] = sgn[full_spd_jnt]*max_vels_[full_spd_jnt];
+    }
+    // std::cout<<"end time:"<<end_time<<std::endl;
+    // std::cout<<sgn<<std::endl;
+    // std::cout<<accelerations<<std::endl;
+    // std::cout<<accel_stop_time<<std::endl;
+    // std::cout<<deccelerations<<std::endl;
+    // std::cout<<deccel_start_time<<std::endl;
+    plan.points[i].time_from_start = ros::Duration(end_time + last_end_time);
+    // vel_profile.emplace_back(sgn*accelerations,-1.0*sgn*deccelerations,accel_stop_time+last_end_time,deccel_start_time+last_end_time);
+    last_end_time += end_time;
+  }
 }
 
 }  // namespace control
