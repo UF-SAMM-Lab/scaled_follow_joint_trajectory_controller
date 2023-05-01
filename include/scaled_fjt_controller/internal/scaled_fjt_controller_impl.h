@@ -15,7 +15,7 @@
 #include <hardware_interface/posvelacc_command_interface.h>
 #include <hardware_interface/robot_hw.h>
 #include <hardware_interface/joint_command_interface.h>
-#include <moveit/trajectory_processing/iterative_time_parameterization.h>
+// #include <moveit/trajectory_processing/iterative_time_parameterization.h>
 
 namespace eu = eigen_utils;
 
@@ -117,6 +117,7 @@ bool ScaledFJTController<H,T>::doInit()
   m_scaled_pub_id   = this->template add_publisher<std_msgs::Float64>("scaled_time",1);
   m_ratio_pub_id    = this->template add_publisher<std_msgs::Float64>("execution_ratio",1);
   m_unscaled_pub_id = this->template add_publisher<sensor_msgs::JointState>("unscaled_joint_target",1);
+  m_traj_pub_id = this->template add_publisher<trajectory_msgs::JointTrajectory>("act_trajectory",1);
 
   CNR_TRACE(this->logger(),"create action server");
   try
@@ -159,6 +160,7 @@ bool ScaledFJTController<H,T>::doStarting(const ros::Time& /*time*/)
 
   m_microinterpolator.reset(new cnr::control::Microinterpolator());
   m_microinterpolator->setTrajectory(trj);
+  this->publish(m_traj_pub_id,*trj);
 
   int spline_order=1;
   if (!this->getControllerNh().getParam("continuity_order",spline_order))
@@ -498,22 +500,36 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     CNR_INFO(this->logger(),"BLEND TRAJECTORY WITH NO POINT");
     return;
   }
+  std::lock_guard<std::mutex> lock(m_mtx);
+
+  trajectory_msgs::JointTrajectoryPoint act_pt; 
+  act_pt.time_from_start = ros::Duration(0.0);
+  act_pt.positions   = std::vector<double>(this->getPosition().data(), this->getPosition().data() + this->nAx());
+  act_pt.velocities  = std::vector<double>(this->getVelocity().data(), this->getVelocity().data() + this->nAx());
+  act_pt.accelerations.resize(this->nAx(), 0);
+  act_pt.effort.resize(this->nAx(), 0);
+
   try
   {
     trajectory_msgs::JointTrajectory tmp_traj;
     tmp_traj.joint_names = trajectory->joint_names;
-    std::lock_guard<std::mutex> lock(m_mtx);
     if(!m_microinterpolator->interpolate(m_scaled_time,m_currenct_point,m_global_override*1.0) )
     {
       CNR_ERROR(this->logger(), "Couldn't interpolate next point");
     }
-
+    for (int i=0;i<m_currenct_point.velocities.size();i++) {
+      m_currenct_point.velocities[i] *= (1/m_global_override);
+      m_currenct_point.accelerations[i] *= (1/(m_global_override*m_global_override));
+    }
+    CNR_INFO(this->logger(),"first pt");
+    CNR_INFO(this->logger(),m_currenct_point);
     tmp_traj.points.push_back(m_currenct_point);
     ros::Duration original_time_from_start = trajectory->points.front().time_from_start;
     tmp_traj.points.push_back(trajectory->points.front());
     tmp_traj.points.front().time_from_start = ros::Duration(0.0);
     
     blend_time_parameterize(tmp_traj);
+    CNR_INFO(this->logger(),"pt 1 time from start:"<<tmp_traj.points[1].time_from_start.toSec());
     //append the rest of trajectory to tmp_traj
 
 
@@ -522,7 +538,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
       tmp_traj.points.push_back(trajectory->points[i]);
       tmp_traj.points.back().time_from_start = tmp_traj.points.back().time_from_start-original_time_from_start+tmp_traj.points[1].time_from_start;
     }
-    std::cout<<tmp_traj<<std::endl;
+    
 
     trajectory_msgs::JointTrajectoryPtr trj(new trajectory_msgs::JointTrajectory());
 
@@ -535,6 +551,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
   
     CNR_INFO(this->logger(), "Starting managing new blend trajectory, trajectory has " << trj->points.size() << " points");
     m_microinterpolator->setTrajectory(trj);
+    this->publish(m_traj_pub_id,*trj);
     m_scaled_time=ros::Duration(0);
     m_time=ros::Duration(0);
     m_is_finished=0;
@@ -563,10 +580,22 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
 
   // m_as_thread = std::thread(&ScaledFJTController<H,T>::actionServerThread, this);
 
-  m_mtx.lock();
-  m_scaled_time += last_period * m_global_override*1.0;
-  m_time        += last_period;
-  m_mtx.unlock();
+  // m_mtx.lock();
+  // m_scaled_time += last_period * m_global_override*1.0;
+  // m_time        += last_period;
+  trajectory_msgs::JointTrajectoryPoint test_pt = act_pt;
+  CNR_INFO(this->logger(),*m_microinterpolator->getTrajectory());
+  CNR_INFO(this->logger(),m_global_override);
+  m_microinterpolator->interpolate(m_scaled_time,test_pt,m_global_override*1.0);
+
+  CNR_INFO(this->logger(),"act pt:");
+  CNR_INFO(this->logger(),act_pt);
+
+  CNR_INFO(this->logger(),"cur pt:");
+  CNR_INFO(this->logger(),m_currenct_point);
+  CNR_INFO(this->logger(),"nxt pt:");
+  CNR_INFO(this->logger(),test_pt);
+  // m_mtx.unlock();
 
 }
 
@@ -623,6 +652,7 @@ void ScaledFJTController<H,T>::actionGoalCallback(
     std::lock_guard<std::mutex> lock(m_mtx);
     CNR_DEBUG(this->logger(), "Starting managing new goal, trajectory has " << trj->points.size() << " points");
     m_microinterpolator->setTrajectory(trj);
+    this->publish(m_traj_pub_id,*trj);
     m_scaled_time=ros::Duration(0);
     m_time=ros::Duration(0);
     m_is_finished=0;
@@ -681,6 +711,7 @@ void ScaledFJTController<H,T>::actionCancelCallback(
       trj->points.push_back(pnt);
 
       m_microinterpolator->setTrajectory(trj);
+      this->publish(m_traj_pub_id,*trj);
       CNR_TRACE(this->logger(),"cancel trajectory. Stay in \n" << trj);
       m_scaled_time=ros::Duration(0);
       m_time=ros::Duration(0);
@@ -826,9 +857,9 @@ void ScaledFJTController<H,T>::blend_time_parameterize(trajectory_msgs::JointTra
     A(1,0) = mid_time;
     A(1,1) = -(end_time-mid_time);
     Eigen::MatrixXd a_d = A.inverse()*knowns;
-    // std::cout<<"knowns"<<knowns<<std::endl;
-    // std::cout<<"A"<<A<<std::endl;
-    // std::cout<<"a_d"<<a_d<<std::endl;
+    std::cout<<"knowns"<<knowns<<std::endl;
+    std::cout<<"A"<<A<<std::endl;
+    std::cout<<"a_d"<<a_d<<std::endl;
     for (int q=0;q<dof;q++) {
       if (spd_limit_jnts[q]) {
         accelerations[q] = abs(a_d(0,q));
@@ -852,12 +883,12 @@ void ScaledFJTController<H,T>::blend_time_parameterize(trajectory_msgs::JointTra
     if (times_at_full_spd[full_spd_jnt]>0) {
       mid_spds[full_spd_jnt] = sgn[full_spd_jnt]*max_vels_[full_spd_jnt];
     }
-    // std::cout<<"end time:"<<end_time<<std::endl;
-    // std::cout<<sgn<<std::endl;
-    // std::cout<<accelerations<<std::endl;
-    // std::cout<<accel_stop_time<<std::endl;
-    // std::cout<<deccelerations<<std::endl;
-    // std::cout<<deccel_start_time<<std::endl;
+    std::cout<<"end time:"<<end_time<<std::endl;
+    std::cout<<sgn<<std::endl;
+    std::cout<<accelerations<<std::endl;
+    std::cout<<accel_stop_time<<std::endl;
+    std::cout<<deccelerations<<std::endl;
+    std::cout<<deccel_start_time<<std::endl;
     plan.points[i].time_from_start = ros::Duration(end_time + last_end_time);
     // vel_profile.emplace_back(sgn*accelerations,-1.0*sgn*deccelerations,accel_stop_time+last_end_time,deccel_start_time+last_end_time);
     last_end_time += end_time;

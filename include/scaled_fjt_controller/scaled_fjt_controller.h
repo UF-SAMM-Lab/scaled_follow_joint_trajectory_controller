@@ -83,6 +83,7 @@ protected:
   size_t m_scaled_pub_id;
   size_t m_ratio_pub_id;
   size_t m_unscaled_pub_id;
+  size_t m_traj_pub_id;
 
   std::map<std::string,double> m_overrides;
   std::vector<ros::Subscriber> m_override_topic;
