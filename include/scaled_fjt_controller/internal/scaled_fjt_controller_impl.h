@@ -492,12 +492,12 @@ void ScaledFJTController<H,T>::actionServerThread()
 template<class H, class T>
 void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTrajectoryConstPtr& trajectory)
 {
-  CNR_INFO(this->logger(), "Received a new blend trajectory");
+  CNR_DEBUG(this->logger(), "Received a new blend trajectory");
   unsigned  int nPnt = trajectory->points.size();
 
   if (nPnt == 0)
   {
-    CNR_INFO(this->logger(),"BLEND TRAJECTORY WITH NO POINT");
+    CNR_ERROR(this->logger(),"BLEND TRAJECTORY WITH NO POINT");
     return;
   }
   std::lock_guard<std::mutex> lock(m_mtx);
@@ -522,8 +522,8 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
       m_currenct_point.velocities[i] *= (1/tmp_ovr);
       m_currenct_point.accelerations[i] *= (1/(tmp_ovr*tmp_ovr));
     }
-    CNR_INFO(this->logger(),"first pt");
-    CNR_INFO(this->logger(),m_currenct_point);
+    // CNR_INFO(this->logger(),"first pt");
+    // CNR_INFO(this->logger(),m_currenct_point);
     tmp_traj.points.push_back(m_currenct_point);
     ros::Duration original_time_from_start = trajectory->points.front().time_from_start;
     tmp_traj.points.push_back(trajectory->points.front());
@@ -550,7 +550,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     double max_time = std::min(std::max(tmp_traj.points[1].time_from_start.toSec(),vel_time.maxCoeff()),6.0);
     tmp_traj.points[1].time_from_start = ros::Duration(max_time);
 
-    CNR_INFO(this->logger(),"pt 1 time from start:"<<tmp_traj.points[1].time_from_start.toSec());
+    CNR_DEBUG(this->logger(),"pt 1 time from start:"<<tmp_traj.points[1].time_from_start.toSec());
     //append the rest of trajectory to tmp_traj
 
 
@@ -570,7 +570,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     }
 
   
-    CNR_INFO(this->logger(), "Starting managing new blend trajectory, trajectory has " << trj->points.size() << " points");
+    CNR_DEBUG(this->logger(), "Starting managing new blend trajectory, trajectory has " << trj->points.size() << " points");
     m_microinterpolator->setTrajectory(trj);
     this->publish(m_traj_pub_id,*trj);
     m_scaled_time=ros::Duration(0);
@@ -589,12 +589,12 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     {
       ss2 << std::to_string(qd) << " ";  ss2 << "]";
     }
-    CNR_INFO(this->logger(), "First Point of the trajectory:\n q : " + ss1.str() + "\n" + " qd:" + ss2.str());
+    CNR_DEBUG(this->logger(), "First Point of the trajectory:\n q : " + ss1.str() + "\n" + " qd:" + ss2.str());
     // m_start_new_blend_traj = 1;
   }
   catch(std::exception& e)
   {
-    CNR_INFO(this->logger(), "Set Trajectory Failed");
+    CNR_ERROR(this->logger(), "Set Trajectory Failed");
   }
 
   // joinActionServerThread();
@@ -605,17 +605,17 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
   // m_scaled_time += last_period * m_global_override*1.0;
   // m_time        += last_period;
   trajectory_msgs::JointTrajectoryPoint test_pt = act_pt;
-  CNR_INFO(this->logger(),*m_microinterpolator->getTrajectory());
-  CNR_INFO(this->logger(),m_global_override);
+  // CNR_INFO(this->logger(),*m_microinterpolator->getTrajectory());
+  // CNR_INFO(this->logger(),m_global_override);
   m_microinterpolator->interpolate(m_scaled_time,test_pt,m_global_override*1.0);
 
-  CNR_INFO(this->logger(),"act pt:");
-  CNR_INFO(this->logger(),act_pt);
+  // CNR_INFO(this->logger(),"act pt:");
+  // CNR_INFO(this->logger(),act_pt);
 
-  CNR_INFO(this->logger(),"cur pt:");
-  CNR_INFO(this->logger(),m_currenct_point);
-  CNR_INFO(this->logger(),"nxt pt:");
-  CNR_INFO(this->logger(),test_pt);
+  // CNR_INFO(this->logger(),"cur pt:");
+  // CNR_INFO(this->logger(),m_currenct_point);
+  // CNR_INFO(this->logger(),"nxt pt:");
+  // CNR_INFO(this->logger(),test_pt);
   // m_mtx.unlock();
 
 }
