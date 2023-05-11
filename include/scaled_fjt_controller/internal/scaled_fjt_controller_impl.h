@@ -547,7 +547,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     Eigen::ArrayXd avg_time = diff.abs()/avg_vel.abs();
     Eigen::ArrayXd max_accels_ = this->chain().getDDQMax().array();
     Eigen::ArrayXd vel_time = vel_diff.abs()/max_accels_;
-    double max_time = std::min(std::max(tmp_traj.points[1].time_from_start.toSec(),vel_time.maxCoeff()),6.0);
+    double max_time = std::min(std::max(0.7*tmp_traj.points[1].time_from_start.toSec(),vel_time.maxCoeff()),6.0);
     tmp_traj.points[1].time_from_start = ros::Duration(max_time);
 
     CNR_DEBUG(this->logger(),"pt 1 time from start:"<<tmp_traj.points[1].time_from_start.toSec());
