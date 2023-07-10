@@ -513,7 +513,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
   {
     trajectory_msgs::JointTrajectory tmp_traj;
     tmp_traj.joint_names = trajectory->joint_names;
-    if(!m_microinterpolator->interpolate(m_scaled_time,m_currenct_point,m_global_override*1.0) )
+    if(!m_microinterpolator->interpolate(m_scaled_time+last_period * 0.0,m_currenct_point,m_global_override*1.0) ) //period * m_global_override*saturation_override
     {
       CNR_ERROR(this->logger(), "Couldn't interpolate next point");
     }
@@ -547,7 +547,7 @@ void ScaledFJTController<H,T>::blendTrajCallback(const trajectory_msgs::JointTra
     Eigen::ArrayXd avg_time = diff.abs()/avg_vel.abs();
     Eigen::ArrayXd max_accels_ = this->chain().getDDQMax().array();
     Eigen::ArrayXd vel_time = vel_diff.abs()/max_accels_;
-    double max_time = std::min(std::max(0.7*tmp_traj.points[1].time_from_start.toSec(),vel_time.maxCoeff()),6.0);
+    double max_time = std::min(std::max(0.7*tmp_traj.points[1].time_from_start.toSec(),vel_time.maxCoeff()),6.0); //0.7
     tmp_traj.points[1].time_from_start = ros::Duration(max_time);
 
     CNR_DEBUG(this->logger(),"pt 1 time from start:"<<tmp_traj.points[1].time_from_start.toSec());
@@ -671,7 +671,7 @@ void ScaledFJTController<H,T>::actionGoalCallback(
   try
   {
     std::lock_guard<std::mutex> lock(m_mtx);
-    CNR_DEBUG(this->logger(), "Starting managing new goal, trajectory has " << trj->points.size() << " points");
+    CNR_INFO(this->logger(), "Starting managing new goal, trajectory has " << trj->points.size() << " points");
     m_microinterpolator->setTrajectory(trj);
     this->publish(m_traj_pub_id,*trj);
     m_scaled_time=ros::Duration(0);
